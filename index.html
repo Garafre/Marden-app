@@ -670,6 +670,37 @@
     color: var(--gris-oscuro);
     box-shadow: var(--sombra);
   }
+
+  /* SELECTOR DE PERÍODO */
+  .periodo-selector {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 14px;
+    background: var(--gris-claro);
+    border-radius: 10px;
+    padding: 4px;
+  }
+
+  .periodo-btn {
+    flex: 1;
+    padding: 7px 4px;
+    border: none;
+    border-radius: 7px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    background: transparent;
+    color: var(--gris-medio);
+    transition: all 0.18s;
+    text-align: center;
+  }
+
+  .periodo-btn.activo {
+    background: var(--blanco);
+    color: var(--azul);
+    box-shadow: var(--sombra);
+  }
 </style>
 </head>
 <body>
@@ -768,7 +799,12 @@
         </div>
       </div>
 
-      <div class="seccion-titulo">Últimas compras</div>
+      <div class="seccion-titulo">Compras por período</div>
+      <div class="periodo-selector">
+        <button class="periodo-btn activo" onclick="cambiarPeriodoFicha('mes_actual', this)">Este mes</button>
+        <button class="periodo-btn" onclick="cambiarPeriodoFicha('mes_anterior', this)">Mes anterior</button>
+        <button class="periodo-btn" onclick="cambiarPeriodoFicha('tres_meses', this)">Últimos 3 meses</button>
+      </div>
       <div class="card" id="ficha-historial-contenido">
         <div class="loading"><div class="spinner"></div><div class="loading-texto">Cargando historial...</div></div>
       </div>
@@ -828,6 +864,11 @@
 
     <!-- MI PANEL -->
     <div class="pantalla" id="tab-panel">
+      <div class="periodo-selector" style="margin-bottom:16px">
+        <button class="periodo-btn activo" onclick="cambiarPeriodoPanel('mes_actual', this)">Este mes</button>
+        <button class="periodo-btn" onclick="cambiarPeriodoPanel('mes_anterior', this)">Mes anterior</button>
+        <button class="periodo-btn" onclick="cambiarPeriodoPanel('tres_meses', this)">Últimos 3 meses</button>
+      </div>
       <div id="panel-contenido">
         <div class="loading"><div class="spinner"></div><div class="loading-texto">Cargando panel...</div></div>
       </div>
@@ -846,7 +887,38 @@ let sesion = { nombre: "", canal: "" };
 let todosClientes = [];
 let clienteActivo = null;
 let tabActual = "alertas";
-let periodoAlertas = parseInt(localStorage.getItem("marden_periodo") || "45");
+let periodoFicha = "mes_actual";
+let periodoPanel = "mes_actual";
+
+// CALCULAR FECHAS SEGÚN PERÍODO
+function calcularFechas(periodo) {
+  const hoy = new Date();
+  let desde, hasta;
+  if (periodo === "mes_actual") {
+    desde = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+    hasta = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0);
+  } else if (periodo === "mes_anterior") {
+    desde = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+    hasta = new Date(hoy.getFullYear(), hoy.getMonth(), 0);
+  } else { // tres_meses
+    desde = new Date(hoy.getFullYear(), hoy.getMonth() - 2, 1);
+    hasta = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0);
+  }
+  return {
+    desde: desde.toISOString().split("T")[0],
+    hasta: hasta.toISOString().split("T")[0]
+  };
+}
+
+function etiquetaPeriodo(periodo) {
+  if (periodo === "mes_actual") {
+    return new Date().toLocaleDateString("es-CO", { month: "long", year: "numeric" });
+  } else if (periodo === "mes_anterior") {
+    const d = new Date(); d.setMonth(d.getMonth() - 1);
+    return d.toLocaleDateString("es-CO", { month: "long", year: "numeric" });
+  }
+  return "últimos 3 meses";
+}
 
 // LOGIN
 function iniciarSesion() {
@@ -884,7 +956,7 @@ async function cargarDatos() {
 
 async function cargarAlertas() {
   try {
-    const url = `${API}?accion=alertas&asesor=${encodeURIComponent(sesion.nombre)}&dias=${periodoAlertas}`;
+    const url = `${API}?accion=alertas&asesor=${encodeURIComponent(sesion.nombre)}`;
     const res = await fetch(url);
     const data = await res.json();
     renderAlertas(data);
@@ -901,44 +973,36 @@ async function cargarAlertas() {
 function renderAlertas(alertas) {
   const cont = document.getElementById("alertas-contenido");
   if (!alertas || alertas.length === 0) {
-    cont.innerHTML = `<div class="empty"><div class="empty-icono">🎉</div><div class="empty-titulo">Sin alertas</div><div class="empty-sub">Todos tus clientes han comprado en los últimos ${periodoAlertas} días</div></div>`;
+    cont.innerHTML = `<div class="empty"><div class="empty-icono">🎉</div><div class="empty-titulo">Sin alertas</div><div class="empty-sub">Todos tus clientes están activos</div></div>`;
     return;
   }
 
-  // Umbrales proporcionales al período configurado
-  const umbralCritica = periodoAlertas;
-  const umbralMedia   = Math.round(periodoAlertas * 0.67);
-  const umbralLeve    = Math.round(periodoAlertas * 0.44);
-
-  const criticas = alertas.filter(a => a.dias_sin_compra >= umbralCritica || a.dias_sin_compra === 999);
-  const medias   = alertas.filter(a => a.dias_sin_compra >= umbralMedia && a.dias_sin_compra < umbralCritica);
-  const leves    = alertas.filter(a => a.dias_sin_compra >= umbralLeve  && a.dias_sin_compra < umbralMedia);
+  const criticas = alertas.filter(a => a.dias_sin_compra >= 90);
+  const medias = alertas.filter(a => a.dias_sin_compra >= 60 && a.dias_sin_compra < 90);
+  const leves = alertas.filter(a => a.dias_sin_compra < 60);
 
   let html = `
-    <div style="font-size:11px;color:var(--gris-medio);margin-bottom:10px;text-align:right">
-      Período de análisis: <strong style="color:var(--azul)">${periodoAlertas} días</strong>
-    </div>
     <div class="stats-row">
       <div class="stat-card">
         <div class="stat-numero" style="color:var(--rojo)">${criticas.length}</div>
-        <div class="stat-label">Críticas (+${umbralCritica}d)</div>
+        <div class="stat-label">Críticas (+90 días)</div>
       </div>
       <div class="stat-card">
         <div class="stat-numero" style="color:var(--naranja)">${medias.length}</div>
-        <div class="stat-label">Medias (${umbralMedia}-${umbralCritica}d)</div>
+        <div class="stat-label">Medias (60-90 días)</div>
       </div>
     </div>`;
 
   if (criticas.length > 0) {
-    html += `<div class="card-titulo" style="margin-top:4px">🔴 Críticas — más de ${umbralCritica} días</div>`;
+    html += `<div class="card-titulo" style="margin-top:4px">🔴 Críticas — más de 90 días</div>`;
     criticas.forEach(a => { html += renderAlertaItem(a, "critica"); });
   }
   if (medias.length > 0) {
-    html += `<div class="card-titulo" style="margin-top:12px">🟡 Medias — ${umbralMedia} a ${umbralCritica} días</div>`;
+    html += `<div class="card-titulo" style="margin-top:12px">🟡 Medias — 60 a 90 días</div>`;
     medias.forEach(a => { html += renderAlertaItem(a, "media"); });
   }
   if (leves.length > 0) {
-    html += `<div class="card-titulo" style="margin-top:12px">🔵 Recientes — ${umbralLeve} a ${umbralMedia} días</div>`;
+    html += `<div class="card-titulo" style="margin-top:12px">🔵 Recientes — 45 a 60 días</div>`;
     leves.forEach(a => { html += renderAlertaItem(a, "leve"); });
   }
 
@@ -1007,6 +1071,12 @@ function filtrarClientes() {
 // FICHA
 async function abrirFicha(cliente) {
   clienteActivo = cliente;
+  periodoFicha = "mes_actual"; // reset al abrir ficha
+  // resetear botones de período
+  document.querySelectorAll(".periodo-selector .periodo-btn").forEach((b,i) => {
+    b.classList.toggle("activo", i === 0);
+  });
+
   document.querySelectorAll(".pantalla").forEach(p => p.classList.remove("activa"));
   document.getElementById("pantalla-ficha").style.display = "block";
 
@@ -1017,17 +1087,29 @@ async function abrirFicha(cliente) {
   document.getElementById("ficha-ciudad").textContent = cliente.ciudad || "—";
   document.getElementById("ficha-dir").textContent = cliente.direccion || "Sin dirección";
 
-  document.getElementById("ficha-historial-contenido").innerHTML =
-    `<div class="loading"><div class="spinner"></div><div class="loading-texto">Cargando historial...</div></div>`;
+  await cargarHistorialConPeriodo();
+}
 
+async function cargarHistorialConPeriodo() {
+  const cont = document.getElementById("ficha-historial-contenido");
+  cont.innerHTML = `<div class="loading"><div class="spinner"></div><div class="loading-texto">Cargando historial...</div></div>`;
+  const { desde, hasta } = calcularFechas(periodoFicha);
   try {
-    const url = `${API}?accion=historial&id_cliente=${cliente.id_cliente}`;
+    const url = `${API}?accion=historial&id_cliente=${clienteActivo.id_cliente}&desde=${desde}&hasta=${hasta}`;
     const res = await fetch(url);
     const data = await res.json();
-    renderHistorial(data);
+    renderHistorial(data, periodoFicha);
   } catch(e) {
-    document.getElementById("ficha-historial-contenido").innerHTML = `<div class="empty"><div class="empty-sub">Error cargando historial</div></div>`;
+    cont.innerHTML = `<div class="empty"><div class="empty-sub">Error cargando historial</div></div>`;
   }
+}
+
+function cambiarPeriodoFicha(periodo, btn) {
+  periodoFicha = periodo;
+  // actualizar botones solo del selector de la ficha
+  btn.parentElement.querySelectorAll(".periodo-btn").forEach(b => b.classList.remove("activo"));
+  btn.classList.add("activo");
+  cargarHistorialConPeriodo();
 }
 
 async function abrirFichaDesdeAlerta(idCliente) {
@@ -1046,10 +1128,10 @@ async function abrirFichaDesdeAlerta(idCliente) {
   }
 }
 
-function renderHistorial(compras) {
+function renderHistorial(compras, periodo) {
   const cont = document.getElementById("ficha-historial-contenido");
   if (!compras || compras.length === 0) {
-    cont.innerHTML = `<div class="empty"><div class="empty-icono">📦</div><div class="empty-titulo">Sin compras</div><div class="empty-sub">Este cliente no tiene historial en el período</div></div>`;
+    cont.innerHTML = `<div class="empty"><div class="empty-icono">📦</div><div class="empty-titulo">Sin compras</div><div class="empty-sub">Este cliente no registra compras en ${etiquetaPeriodo(periodo || periodoFicha)}</div></div>`;
     return;
   }
   // Agrupar por marca
@@ -1114,6 +1196,13 @@ function guardarVisita() {
 }
 
 // PANEL
+function cambiarPeriodoPanel(periodo, btn) {
+  periodoPanel = periodo;
+  btn.parentElement.querySelectorAll(".periodo-btn").forEach(b => b.classList.remove("activo"));
+  btn.classList.add("activo");
+  cargarPanel();
+}
+
 async function cargarPanel() {
   const cont = document.getElementById("panel-contenido");
   if (!todosClientes.length) {
@@ -1121,41 +1210,30 @@ async function cargarPanel() {
     return;
   }
 
+  cont.innerHTML = `<div class="loading"><div class="spinner"></div><div class="loading-texto">Cargando panel...</div></div>`;
+
+  const { desde, hasta } = calcularFechas(periodoPanel);
+  const labelPeriodo = etiquetaPeriodo(periodoPanel);
+
   try {
-    const url = `${API}?accion=alertas&asesor=${encodeURIComponent(sesion.nombre)}&dias=${periodoAlertas}`;
-    const res = await fetch(url);
-    const alertas = await res.json();
+    const [resAlertas, resVentas] = await Promise.all([
+      fetch(`${API}?accion=alertas&asesor=${encodeURIComponent(sesion.nombre)}`),
+      fetch(`${API}?accion=ventas_asesor&asesor=${encodeURIComponent(sesion.nombre)}&desde=${desde}&hasta=${hasta}`)
+    ]);
+    const alertas = await resAlertas.json();
+    const ventas = await resVentas.json();
 
     const totalClientes = todosClientes.length;
     const enAlerta = alertas ? alertas.length : 0;
     const activos = totalClientes - enAlerta;
-
-    const selectorPeriodo = `
-      <div class="card" style="margin-bottom:12px">
-        <div class="card-titulo">⚙️ Configuración de alertas</div>
-        <div style="font-size:13px;color:var(--gris-medio);margin-bottom:10px">
-          Período de inactividad para generar alerta
-        </div>
-        <div style="display:flex;gap:8px">
-          ${[15,30,45].map(d => `
-            <button onclick="cambiarPeriodo(${d})" style="
-              flex:1; padding:10px 0; border-radius:8px; border:2px solid ${periodoAlertas===d?'var(--azul)':'var(--borde)'};
-              background:${periodoAlertas===d?'var(--azul)':'var(--blanco)'}; color:${periodoAlertas===d?'var(--blanco)':'var(--gris-oscuro)'};
-              font-family:'DM Sans',sans-serif; font-size:14px; font-weight:600; cursor:pointer; transition:all 0.2s;">
-              ${d} días
-            </button>`).join("")}
-        </div>
-        <div style="font-size:11px;color:var(--gris-medio);margin-top:8px;text-align:center">
-          Este período aplica para todos los asesores
-        </div>
-      </div>`;
+    const totalVentas = ventas && ventas.total ? ventas.total : 0;
+    const clientesConCompra = ventas && ventas.clientes_activos ? ventas.clientes_activos : 0;
 
     cont.innerHTML = `
-      ${selectorPeriodo}
       <div class="panel-resumen">
-        <div class="titulo">Mi cartera</div>
-        <div class="valor">${totalClientes}</div>
-        <div class="sub">clientes asignados</div>
+        <div class="titulo">Ventas — ${labelPeriodo}</div>
+        <div class="valor">${formatPesos(totalVentas)}</div>
+        <div class="sub">${clientesConCompra} clientes compraron en este período</div>
       </div>
       <div class="stats-row">
         <div class="stat-card">
@@ -1176,7 +1254,7 @@ async function cargarPanel() {
           <span style="font-size:13px;font-weight:700;color:var(--verde)">${Math.round(activos/totalClientes*100)}%</span>
         </div>
         <div style="font-size:12px;color:var(--gris-medio)">
-          ${activos} de ${totalClientes} clientes han comprado en los últimos <strong>${periodoAlertas} días</strong>
+          ${activos} de ${totalClientes} clientes han comprado en los últimos 45 días
         </div>
       </div>
       <div class="card">
@@ -1199,15 +1277,6 @@ async function cargarPanel() {
   } catch(e) {
     cont.innerHTML = `<div class="empty"><div class="empty-icono">⚠️</div><div class="empty-titulo">Error cargando panel</div></div>`;
   }
-}
-
-function cambiarPeriodo(dias) {
-  periodoAlertas = dias;
-  localStorage.setItem("marden_periodo", dias);
-  // Refrescar panel y alertas con el nuevo período
-  cargarPanel();
-  cargarAlertas();
-  mostrarToast(`✅ Período actualizado a ${dias} días`);
 }
 
 // UTILIDADES
